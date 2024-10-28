@@ -4,7 +4,6 @@
   "description": "Proyecto Node.js para extraer datos y generar XML desplegado en Railway",
   "main": "app.js",
   "scripts": {
-    "install": "npm install --omit=dev",
     "start": "node app.js"
   },
   "dependencies": {
