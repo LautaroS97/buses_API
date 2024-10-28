@@ -1,8 +1,6 @@
 const express = require('express');
 const axios = require('axios');
 const xmlbuilder = require('xmlbuilder');
-const dns = require('dns');
-const https = require('https');
 
 // Cargar variables de entorno solo en desarrollo
 if (process.env.NODE_ENV !== 'production') {
@@ -48,20 +46,10 @@ console.log('Credenciales de API:', {
 // Función para obtener el token de autenticación
 async function obtenerToken() {
   try {
-    const agent = new https.Agent({
-      rejectUnauthorized: false, // No verificar el certificado SSL (NO RECOMENDADO PARA PRODUCCIÓN)
+    const response = await axios.post('https://apiavl.easytrack.com.ar/sessions/auth/', {
+      username: apiCredentials.username,
+      password: apiCredentials.password,
     });
-
-    const response = await axios.post(
-      'https://apiavl.easytrack.com.ar/sessions/auth/',
-      {
-        username: apiCredentials.username,
-        password: apiCredentials.password,
-      },
-      {
-        httpsAgent: agent,
-      }
-    );
 
     console.log('Respuesta de autenticación:', response.data);
     return response.data.jwt; // Retornar el token JWT
@@ -83,15 +71,10 @@ async function obtenerToken() {
 // Función para obtener la ubicación de un bus a partir de su matrícula
 async function obtenerUbicacionBus(token, matricula) {
   try {
-    const agent = new https.Agent({
-      rejectUnauthorized: false, // No verificar el certificado SSL (NO RECOMENDADO PARA PRODUCCIÓN)
-    });
-
     const response = await axios.get(`https://apiavl.easytrack.com.ar/positions/${matricula}`, {
       headers: {
         Authorization: `Bearer ${token}`,
       },
-      httpsAgent: agent,
     });
 
     const busData = response.data[0]; // Tomamos el primer elemento del array
@@ -174,47 +157,6 @@ app.get('/voice/:busKey', (req, res) => {
 
     res.type('application/xml');
     res.send(xml);
-  }
-});
-
-// Ruta para probar la conectividad a la API
-app.get('/test-connectivity', async (req, res) => {
-  try {
-    // Probar resolución DNS
-    dns.lookup('apiavl.easytrack.com.ar', (err, address, family) => {
-      if (err) {
-        res.send(`Error al resolver DNS: ${err.message}`);
-      } else {
-        res.write(`Dirección IP de apiavl.easytrack.com.ar: ${address}, familia: IPv${family}\n`);
-
-        // Probar conexión HTTPS
-        const options = {
-          hostname: 'apiavl.easytrack.com.ar',
-          port: 443,
-          path: '/',
-          method: 'GET',
-          timeout: 5000,
-        };
-
-        const req = https.request(options, (resp) => {
-          res.write(`Código de estado de respuesta: ${resp.statusCode}\n`);
-          res.end('Conectividad exitosa con la API.');
-        });
-
-        req.on('error', (e) => {
-          res.end(`Error al conectar con la API: ${e.message}`);
-        });
-
-        req.on('timeout', () => {
-          req.destroy();
-          res.end('Tiempo de espera agotado al conectar con la API.');
-        });
-
-        req.end();
-      }
-    });
-  } catch (error) {
-    res.send(`Error al realizar la prueba de conectividad: ${error.message}`);
   }
 });
 
