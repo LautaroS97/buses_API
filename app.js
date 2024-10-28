@@ -143,15 +143,29 @@ async function extractDataAndGenerateXMLScraping() {
 
     console.log('Presionando Enter...');
     await page.keyboard.press('Enter');
-    await page.waitForNavigation({
-      waitUntil: 'domcontentloaded',
-      timeout: 10000,
-    });
+    
+    // Verificar si el login fue exitoso buscando un elemento del dashboard
+    try {
+      await page.waitForSelector('app-root app-dashboard', {
+        waitUntil: 'domcontentloaded',
+        timeout: 10000 // Tiempo máximo de espera para que cargue el dashboard
+      });
+      console.log('Login exitoso, navegando al dashboard.');
+    } catch (error) {
+      console.error('Error en el login. No se pudo cargar el dashboard.');
+      throw new Error('Error en el login.');
+    }
+
+    // Espera adicional para garantizar que el DOM esté completamente cargado antes de proceder
+    await page.waitForTimeout(5000); // 5 segundos de espera adicional
 
     console.log('Navegando al dashboard principal...');
     await page.goto('https://avl.easytrack.com.ar/dashboard/1000', {
       waitUntil: 'domcontentloaded',
     });
+
+    // Esperar a que el dashboard esté completamente cargado
+    await page.waitForSelector('.ag-body-viewport', { timeout: 10000 });
 
     const notFoundBuses = [];
 
@@ -170,6 +184,9 @@ async function extractDataAndGenerateXMLScraping() {
         waitUntil: 'domcontentloaded',
       });
 
+      // Esperar a que el dashboard esté completamente cargado
+      await page.waitForSelector('.ag-body-viewport', { timeout: 10000 });
+
       const notFoundBusesSecond = [];
 
       for (let busKey of notFoundBuses) {
@@ -185,6 +202,9 @@ async function extractDataAndGenerateXMLScraping() {
         await page.goto('https://avl.easytrack.com.ar/dashboard/1006', {
           waitUntil: 'domcontentloaded',
         });
+
+        // Esperar a que el dashboard esté completamente cargado
+        await page.waitForSelector('.ag-body-viewport', { timeout: 10000 });
 
         for (let busKey of notFoundBusesSecond) {
           await extractDataForBus(page, busKey, buses[busKey]); // Último intento
