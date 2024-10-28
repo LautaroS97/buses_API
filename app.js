@@ -3,6 +3,7 @@ const express = require('express');
 const axios = require('axios');
 const puppeteer = require('puppeteer');
 const xmlbuilder = require('xmlbuilder');
+const fs = require('fs');
 
 const app = express();
 app.use(express.json());
@@ -153,6 +154,11 @@ async function extractDataAndGenerateXMLScraping() {
       console.log('Login exitoso, navegando al dashboard.');
     } catch (error) {
       console.error('Error en el login. No se pudo cargar el dashboard.');
+
+      // Tomar una captura de pantalla para analizar por qué falla el login
+      await page.screenshot({ path: 'login_error.png' });
+      console.log('Se ha guardado una captura de pantalla del error en login en login_error.png');
+      
       throw new Error('Error en el login.');
     }
 
