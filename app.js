@@ -20,44 +20,15 @@ const buses = {
     bus_3: 'FMD808',
 };
 
-// Credenciales para autenticación en la API
-const apiCredentials = {
-    username: process.env.API_USERNAME,
-    password: process.env.API_PASSWORD,
-};
-
-// Variables para caché del token
-let cachedToken = null;
-let tokenExpirationTime = 0;
-
-// Función para obtener el token de autenticación con caché
-async function obtenerToken() {
-    const now = Date.now();
-    if (cachedToken && now < tokenExpirationTime) {
-        return cachedToken;
-    }
-
-    try {
-        const response = await axios.post('https://apiavl.easytrack.com.ar/sessions/auth/', {
-            username: apiCredentials.username,
-            password: apiCredentials.password,
-        });
-
-        cachedToken = response.data.jwt;
-        tokenExpirationTime = now + 60 * 60 * 1000; // Asumimos que el token dura 1 hora
-        return cachedToken;
-    } catch (error) {
-        console.error('Error de la API. El servidor no responde.');
-        throw new Error('Error en la autenticación');
-    }
-}
+// Token JWT de autenticación (cargado desde las variables de entorno)
+let cachedToken = process.env.API_JWT_TOKEN;
 
 // Función para obtener la ubicación de un bus a partir de su matrícula
 async function obtenerUbicacionBus(token, matricula) {
     try {
         const response = await axios.get(`https://apiavl.easytrack.com.ar/positions/${matricula}`, {
             headers: {
-                Authorization: `Bearer ${token}`,
+                Authorization: `Bearer ${token}`, // Usar el token cargado desde la variable de entorno
             },
         });
 
@@ -79,8 +50,7 @@ async function obtenerUbicacionBus(token, matricula) {
 // Función para extraer datos de los buses y generar el XML
 async function extractDataAndGenerateXML() {
     try {
-        console.log('Obteniendo token de autenticación...');
-        const token = await obtenerToken();
+        const token = cachedToken; // Usar el token desde las variables de entorno
 
         const busEntries = Object.entries(buses);
 
@@ -157,9 +127,8 @@ app.get('/voice/:busKey', (req, res) => {
     }
 });
 
-const PORT = process.env.PORT || 8080;
-app.listen(PORT, async () => {
-    console.log(`Servidor escuchando en el puerto ${PORT}`);
+app.listen(8080, async () => {
+    console.log(`Servidor escuchando en el puerto 8080`);
     // Actualizar los XML por primera vez después del despliegue
     await extractDataAndGenerateXML();
 });
