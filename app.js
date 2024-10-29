@@ -1,6 +1,7 @@
 const express = require('express');
 const axios = require('axios');
 const xmlbuilder = require('xmlbuilder');
+const jwtDecode = require('jwt-decode');
 require('dotenv').config(); // Cargar variables de entorno desde el archivo .env
 
 const app = express();
