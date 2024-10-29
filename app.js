@@ -22,6 +22,32 @@ const buses = {
 
 // Token JWT de autenticación (cargado desde las variables de entorno)
 let cachedToken = process.env.API_JWT_TOKEN;
+let refreshToken = process.env.API_REFRESH_TOKEN;
+
+// Función para renovar el token si ha expirado
+async function renovarToken() {
+    try {
+        const response = await axios.post('https://apiavl.easytrack.com.ar/sessions/auth/', {
+            username: process.env.API_USERNAME, // Usar el nombre de usuario del archivo .env
+            password: process.env.API_PASSWORD, // Usar la contraseña desde el archivo .env
+        });
+
+        const { jwt, refreshToken: newRefreshToken } = response.data;
+        cachedToken = jwt; // Actualizar el token JWT
+        refreshToken = newRefreshToken; // Actualizar el refresh token
+
+        console.log('Token renovado exitosamente');
+    } catch (error) {
+        console.error('Error al renovar el token:', error.message);
+    }
+}
+
+// Función para verificar si el token ha expirado
+function tokenHaExpirado() {
+    const now = Math.floor(Date.now() / 1000); // Tiempo actual en formato UNIX
+    const exp = jwtDecode(cachedToken).exp; // Decodificar el token JWT para obtener el tiempo de expiración
+    return now >= exp;
+}
 
 // Función para obtener la ubicación de un bus a partir de su matrícula
 async function obtenerUbicacionBus(token, matricula) {
@@ -50,8 +76,12 @@ async function obtenerUbicacionBus(token, matricula) {
 // Función para extraer datos de los buses y generar el XML
 async function extractDataAndGenerateXML() {
     try {
-        const token = cachedToken; // Usar el token desde las variables de entorno
+        // Verificar si el token ha expirado y renovarlo si es necesario
+        if (tokenHaExpirado()) {
+            await renovarToken();
+        }
 
+        const token = cachedToken; // Usar el token actualizado
         const busEntries = Object.entries(buses);
 
         // Paralelizar las solicitudes
