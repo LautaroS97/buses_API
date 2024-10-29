@@ -1,7 +1,6 @@
 const express = require('express');
 const axios = require('axios');
 const xmlbuilder = require('xmlbuilder');
-const jwtDecode = require('jwt-decode');
 require('dotenv').config(); // Cargar variables de entorno desde el archivo .env
 
 const app = express();
@@ -21,33 +20,36 @@ const buses = {
     bus_3: 'FMD808',
 };
 
-// Token JWT de autenticación (cargado desde las variables de entorno)
-let cachedToken = process.env.API_JWT_TOKEN;
-let refreshToken = process.env.API_REFRESH_TOKEN;
+// Credenciales para autenticación en la API
+const apiCredentials = {
+    username: process.env.API_USERNAME,
+    password: process.env.API_PASSWORD,
+};
 
-// Función para renovar el token si ha expirado
-async function renovarToken() {
+// Variables para caché del token
+let cachedToken = null;
+let tokenExpirationTime = 0;
+
+// Función para obtener el token de autenticación con caché
+async function obtenerToken() {
+    const now = Date.now();
+    if (cachedToken && now < tokenExpirationTime) {
+        return cachedToken;
+    }
+
     try {
         const response = await axios.post('https://apiavl.easytrack.com.ar/sessions/auth/', {
-            username: process.env.API_USERNAME, // Usar el nombre de usuario del archivo .env
-            password: process.env.API_PASSWORD, // Usar la contraseña desde el archivo .env
+            username: apiCredentials.username,
+            password: apiCredentials.password,
         });
 
-        const { jwt, refreshToken: newRefreshToken } = response.data;
-        cachedToken = jwt; // Actualizar el token JWT
-        refreshToken = newRefreshToken; // Actualizar el refresh token
-
-        console.log('Token renovado exitosamente');
+        cachedToken = response.data.jwt;
+        tokenExpirationTime = now + 60 * 60 * 1000; // Asumimos que el token dura 1 hora
+        return cachedToken;
     } catch (error) {
-        console.error('Error al renovar el token:', error.message);
+        console.error('Error de la API. El servidor no responde.');
+        throw new Error('Error en la autenticación');
     }
-}
-
-// Función para verificar si el token ha expirado
-function tokenHaExpirado() {
-    const now = Math.floor(Date.now() / 1000); // Tiempo actual en formato UNIX
-    const exp = jwtDecode(cachedToken).exp; // Decodificar el token JWT para obtener el tiempo de expiración
-    return now >= exp;
 }
 
 // Función para obtener la ubicación de un bus a partir de su matrícula
@@ -55,7 +57,7 @@ async function obtenerUbicacionBus(token, matricula) {
     try {
         const response = await axios.get(`https://apiavl.easytrack.com.ar/positions/${matricula}`, {
             headers: {
-                Authorization: `Bearer ${token}`, // Usar el token cargado desde la variable de entorno
+                Authorization: `Bearer ${token}`,
             },
         });
 
@@ -77,12 +79,9 @@ async function obtenerUbicacionBus(token, matricula) {
 // Función para extraer datos de los buses y generar el XML
 async function extractDataAndGenerateXML() {
     try {
-        // Verificar si el token ha expirado y renovarlo si es necesario
-        if (tokenHaExpirado()) {
-            await renovarToken();
-        }
+        console.log('Obteniendo token de autenticación...');
+        const token = await obtenerToken();
 
-        const token = cachedToken; // Usar el token actualizado
         const busEntries = Object.entries(buses);
 
         // Paralelizar las solicitudes
@@ -158,8 +157,9 @@ app.get('/voice/:busKey', (req, res) => {
     }
 });
 
-app.listen(8080, async () => {
-    console.log(`Servidor escuchando en el puerto 8080`);
+const PORT = process.env.PORT || 8080;
+app.listen(PORT, async () => {
+    console.log(`Servidor escuchando en el puerto ${PORT}`);
     // Actualizar los XML por primera vez después del despliegue
     await extractDataAndGenerateXML();
 });
