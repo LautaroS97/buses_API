@@ -10,7 +10,6 @@
     "axios": "^1.7.7",
     "dotenv": "^16.4.5",
     "express": "^4.21.0",
-    "jwt-decode": "^3.1.2",
     "xmlbuilder": "^15.1.1"
   },
   "engines": {
