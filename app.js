@@ -1,8 +1,9 @@
-const express = require('express');
-const axios = require('axios');
-const xmlbuilder = require('xmlbuilder');
-const jwtDecode = require('jwt-decode');
-require('dotenv').config(); // Cargar variables de entorno desde el archivo .env
+import express from 'express';
+import axios from 'axios';
+import xmlbuilder from 'xmlbuilder';
+import jwtDecode from 'jwt-decode';
+import dotenv from 'dotenv';
+dotenv.config(); // Cargar variables de entorno desde el archivo .env
 
 const app = express();
 app.use(express.json()); // Para manejar el cuerpo de solicitudes POST
