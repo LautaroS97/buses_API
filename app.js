@@ -47,7 +47,18 @@ async function obtenerToken() {
         tokenExpirationTime = now + 60 * 60 * 1000; // Asumimos que el token dura 1 hora
         return cachedToken;
     } catch (error) {
-        console.error('Error de la API. El servidor no responde.');
+        console.error('Error en la autenticación con la API:');
+        if (error.response) {
+            // El servidor respondió con un código de estado fuera del rango 2xx
+            console.error(`Error en la respuesta de la API: Status: ${error.response.status}, Data: ${JSON.stringify(error.response.data)}`);
+        } else if (error.request) {
+            // La solicitud fue hecha pero no hubo respuesta
+            console.error('No se recibió respuesta de la API:', error.request);
+        } else {
+            // Otro tipo de error, como un error de configuración
+            console.error('Error en la configuración de la solicitud:', error.message);
+        }
+        console.error('Configuración de la solicitud que falló:', error.config);
         throw new Error('Error en la autenticación');
     }
 }
@@ -71,7 +82,15 @@ async function obtenerUbicacionBus(token, matricula) {
             return { success: false, text: '' };
         }
     } catch (error) {
-        console.error(`Error de la API al obtener la ubicación del bus ${matricula}:`, error.message);
+        console.error(`Error al obtener la ubicación del bus ${matricula}:`);
+        if (error.response) {
+            console.error(`Error en la respuesta de la API: Status: ${error.response.status}, Data: ${JSON.stringify(error.response.data)}`);
+        } else if (error.request) {
+            console.error('No se recibió respuesta de la API:', error.request);
+        } else {
+            console.error('Error en la configuración de la solicitud:', error.message);
+        }
+        console.error('Configuración de la solicitud que falló:', error.config);
         return { success: false, text: '' };
     }
 }
