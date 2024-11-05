@@ -1,10 +1,10 @@
 const https = require('https');
 
-https.get('https://jsonplaceholder.typicode.com/todos/1', (res) => {
+https.get('https://apiavl.easytrack.com.ar', (res) => {
   console.log('Status Code:', res.statusCode);
   res.on('data', (d) => {
     process.stdout.write(d);
   });
 }).on('error', (e) => {
-  console.error('Error testing connection to external URL:', e);
+  console.error('Error connecting to EasyTrack API:', e);
 });
