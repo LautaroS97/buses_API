@@ -30,10 +30,11 @@ const apiCredentials = {
 let cachedToken = null;
 let tokenExpirationTime = 0;
 
-// Función para obtener el token de autenticación con caché
-async function obtenerToken() {
+// Función para obtener el token de autenticación con caché y actualización en caso de error
+async function obtenerToken(forceNewToken = false) {
     const now = Date.now();
-    if (cachedToken && now < tokenExpirationTime) {
+    // Verificar si el token está en caché, no ha expirado y no se requiere forzar uno nuevo
+    if (cachedToken && now < tokenExpirationTime && !forceNewToken) {
         return cachedToken;
     }
 
@@ -44,18 +45,15 @@ async function obtenerToken() {
         });
 
         cachedToken = response.data.jwt;
-        tokenExpirationTime = now + 60 * 60 * 1000; // Asumimos que el token dura 1 hora
+        tokenExpirationTime = now + 12 * 60 * 60 * 1000; // Duración de 12 horas
         return cachedToken;
     } catch (error) {
         console.error('Error en la autenticación con la API:');
         if (error.response) {
-            // El servidor respondió con un código de estado fuera del rango 2xx
             console.error(`Error en la respuesta de la API: Status: ${error.response.status}, Data: ${JSON.stringify(error.response.data)}`);
         } else if (error.request) {
-            // La solicitud fue hecha pero no hubo respuesta
             console.error('No se recibió respuesta de la API:', error.request);
         } else {
-            // Otro tipo de error, como un error de configuración
             console.error('Error en la configuración de la solicitud:', error.message);
         }
         console.error('Configuración de la solicitud que falló:', error.config);
@@ -64,15 +62,16 @@ async function obtenerToken() {
 }
 
 // Función para obtener la ubicación de un bus a partir de su matrícula
-async function obtenerUbicacionBus(token, matricula) {
+async function obtenerUbicacionBus(matricula) {
     try {
+        const token = await obtenerToken();
         const response = await axios.get(`https://apiavl.easytrack.com.ar/positions/${matricula}`, {
             headers: {
                 Authorization: `Bearer ${token}`,
             },
         });
 
-        const busData = response.data[0]; // Tomamos el primer elemento del array
+        const busData = response.data[0];
         if (busData && busData.position) {
             const direccionTruncada = busData.position.split(',').slice(0, 2).join(',').trim();
             console.log(`Matrícula ${matricula} - Dirección: ${direccionTruncada}`);
@@ -82,16 +81,33 @@ async function obtenerUbicacionBus(token, matricula) {
             return { success: false, text: '' };
         }
     } catch (error) {
-        console.error(`Error al obtener la ubicación del bus ${matricula}:`);
-        if (error.response) {
-            console.error(`Error en la respuesta de la API: Status: ${error.response.status}, Data: ${JSON.stringify(error.response.data)}`);
-        } else if (error.request) {
-            console.error('No se recibió respuesta de la API:', error.request);
+        // Si el error es de autenticación, forzar la obtención de un nuevo token y reintentar
+        if (error.response && error.response.status === 401) {
+            console.error(`Token expirado o inválido. Intentando obtener un nuevo token para la matrícula ${matricula}...`);
+            try {
+                const token = await obtenerToken(true); // Forzar nuevo token
+                const response = await axios.get(`https://apiavl.easytrack.com.ar/positions/${matricula}`, {
+                    headers: {
+                        Authorization: `Bearer ${token}`,
+                    },
+                });
+                const busData = response.data[0];
+                if (busData && busData.position) {
+                    const direccionTruncada = busData.position.split(',').slice(0, 2).join(',').trim();
+                    console.log(`Matrícula ${matricula} - Dirección: ${direccionTruncada}`);
+                    return { success: true, text: direccionTruncada };
+                } else {
+                    console.log(`No se encontró la dirección para la matrícula ${matricula}.`);
+                    return { success: false, text: '' };
+                }
+            } catch (retryError) {
+                console.error(`Error tras intentar obtener un nuevo token para ${matricula}:`, retryError);
+                return { success: false, text: '' };
+            }
         } else {
-            console.error('Error en la configuración de la solicitud:', error.message);
+            console.error(`Error al obtener la ubicación del bus ${matricula}:`, error);
+            return { success: false, text: '' };
         }
-        console.error('Configuración de la solicitud que falló:', error.config);
-        return { success: false, text: '' };
     }
 }
 
@@ -99,7 +115,7 @@ async function obtenerUbicacionBus(token, matricula) {
 async function extractDataAndGenerateXML() {
     try {
         console.log('Obteniendo token de autenticación...');
-        const token = await obtenerToken();
+        await obtenerToken();
 
         const busEntries = Object.entries(buses);
 
@@ -107,7 +123,7 @@ async function extractDataAndGenerateXML() {
         const results = await Promise.all(
             busEntries.map(async ([key, matricula]) => {
                 console.log(`Buscando la ubicación de la matrícula ${matricula}...`);
-                const result = await obtenerUbicacionBus(token, matricula);
+                const result = await obtenerUbicacionBus(matricula);
                 return { key, result };
             })
         );
