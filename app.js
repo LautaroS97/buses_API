@@ -33,16 +33,19 @@ let tokenExpirationTime = 0;
 // Función para obtener el token de autenticación con caché y actualización en caso de error
 async function obtenerToken(forceNewToken = false) {
     const now = Date.now();
-    // Verificar si el token está en caché, no ha expirado y no se requiere forzar uno nuevo
     if (cachedToken && now < tokenExpirationTime && !forceNewToken) {
+        console.log('Usando token en caché.');
         return cachedToken;
     }
 
     try {
+        console.log('Enviando solicitud de autenticación...');
         const response = await axios.post('https://apiavl.easytrack.com.ar/sessions/auth/', {
             username: apiCredentials.username,
             password: apiCredentials.password,
         });
+
+        console.log('Respuesta de autenticación:', JSON.stringify(response.data));
 
         cachedToken = response.data.jwt;
         tokenExpirationTime = now + 12 * 60 * 60 * 1000; // Duración de 12 horas
@@ -50,7 +53,7 @@ async function obtenerToken(forceNewToken = false) {
     } catch (error) {
         console.error('Error en la autenticación con la API:');
         if (error.response) {
-            console.error(`Error en la respuesta de la API: Status: ${error.response.status}, Data: ${JSON.stringify(error.response.data)}`);
+            console.error(`Respuesta de la API: Status: ${error.response.status}, Data: ${JSON.stringify(error.response.data)}`);
         } else if (error.request) {
             console.error('No se recibió respuesta de la API:', error.request);
         } else {
@@ -65,11 +68,14 @@ async function obtenerToken(forceNewToken = false) {
 async function obtenerUbicacionBus(matricula) {
     try {
         const token = await obtenerToken();
+        console.log(`Enviando solicitud de ubicación para el bus con matrícula ${matricula}...`);
         const response = await axios.get(`https://apiavl.easytrack.com.ar/positions/${matricula}`, {
             headers: {
                 Authorization: `Bearer ${token}`,
             },
         });
+
+        console.log(`Respuesta de la API para ${matricula}:`, JSON.stringify(response.data));
 
         const busData = response.data[0];
         if (busData && busData.position) {
@@ -81,16 +87,17 @@ async function obtenerUbicacionBus(matricula) {
             return { success: false, text: '' };
         }
     } catch (error) {
-        // Si el error es de autenticación, forzar la obtención de un nuevo token y reintentar
         if (error.response && error.response.status === 401) {
             console.error(`Token expirado o inválido. Intentando obtener un nuevo token para la matrícula ${matricula}...`);
             try {
-                const token = await obtenerToken(true); // Forzar nuevo token
+                const token = await obtenerToken(true);
                 const response = await axios.get(`https://apiavl.easytrack.com.ar/positions/${matricula}`, {
                     headers: {
                         Authorization: `Bearer ${token}`,
                     },
                 });
+                console.log(`Respuesta de la API tras reintento para ${matricula}:`, JSON.stringify(response.data));
+
                 const busData = response.data[0];
                 if (busData && busData.position) {
                     const direccionTruncada = busData.position.split(',').slice(0, 2).join(',').trim();
@@ -119,7 +126,6 @@ async function extractDataAndGenerateXML() {
 
         const busEntries = Object.entries(buses);
 
-        // Paralelizar las solicitudes
         const results = await Promise.all(
             busEntries.map(async ([key, matricula]) => {
                 console.log(`Buscando la ubicación de la matrícula ${matricula}...`);
@@ -130,7 +136,6 @@ async function extractDataAndGenerateXML() {
 
         results.forEach(({ key, result }) => {
             if (result.success) {
-                // Generar el XML correspondiente
                 const xml = xmlbuilder.create('Response')
                     .ele('Say', {}, result.text)
                     .up()
@@ -140,7 +145,6 @@ async function extractDataAndGenerateXML() {
                 console.log(`XML generado para ${key}:\n${xml}`);
                 latestXml[key] = xml;
             } else {
-                // Generar un XML de error en caso de no obtener la ubicación
                 const xml = xmlbuilder.create('Response')
                     .ele('Say', {}, 'Lo sentimos, no se pudo obtener la información en este momento. Por favor, intente nuevamente más tarde.')
                     .up()
@@ -180,7 +184,6 @@ app.get('/voice/:busKey', (req, res) => {
         res.type('application/xml');
         res.send(latestXml[busKey]);
     } else {
-        // Generar un XML de error en caso de no tener datos recientes
         const xml = xmlbuilder.create('Response')
             .ele('Say', {}, 'Lo sentimos, no se pudo obtener la información en este momento. Por favor, intente nuevamente más tarde.')
             .up()
@@ -195,6 +198,5 @@ app.get('/voice/:busKey', (req, res) => {
 const PORT = process.env.PORT || 8080;
 app.listen(PORT, async () => {
     console.log(`Servidor escuchando en el puerto ${PORT}`);
-    // Actualizar los XML por primera vez después del despliegue
     await extractDataAndGenerateXML();
 });
