@@ -20,130 +20,42 @@ const buses = {
     bus_3: 'FMD808',
 };
 
-// Credenciales para autenticación en la API
-const apiCredentials = {
-    username: process.env.API_USERNAME,
-    password: process.env.API_PASSWORD,
-};
-
-// Variables para caché del token
-let cachedToken = null;
-let tokenExpirationTime = 0;
-
-// Función para obtener el token de autenticación con caché y actualización en caso de error
-async function obtenerToken(forceNewToken = false) {
-    const now = Date.now();
-    if (cachedToken && now < tokenExpirationTime && !forceNewToken) {
-        console.log('Usando token en caché.');
-        return cachedToken;
-    }
-
+// Función para obtener las ubicaciones desde el proxy de WordPress
+async function obtenerUbicacionesDesdeProxy() {
     try {
-        console.log('Enviando solicitud de autenticación...');
-        const response = await axios.post('https://apiavl.easytrack.com.ar/sessions/auth/', {
-            username: apiCredentials.username,
-            password: apiCredentials.password,
-        });
-
-        console.log('Respuesta de autenticación:', JSON.stringify(response.data));
-
-        cachedToken = response.data.jwt;
-        tokenExpirationTime = now + 12 * 60 * 60 * 1000; // Duración de 12 horas
-        return cachedToken;
-    } catch (error) {
-        console.error('Error en la autenticación con la API:');
-        if (error.response) {
-            console.error(`Respuesta de la API: Status: ${error.response.status}, Data: ${JSON.stringify(error.response.data)}`);
-        } else if (error.request) {
-            console.error('No se recibió respuesta de la API:', error.request);
-        } else {
-            console.error('Error en la configuración de la solicitud:', error.message);
-        }
-        console.error('Configuración de la solicitud que falló:', error.config);
-        throw new Error('Error en la autenticación');
-    }
-}
-
-// Función para obtener la ubicación de un bus a partir de su matrícula
-async function obtenerUbicacionBus(matricula) {
-    try {
-        const token = await obtenerToken();
-        console.log(`Enviando solicitud de ubicación para el bus con matrícula ${matricula}...`);
-        const response = await axios.get(`https://apiavl.easytrack.com.ar/positions/${matricula}`, {
+        console.log('Solicitando datos al proxy de WordPress...');
+        const response = await axios.post('https://proprop.com.ar/wp-json/custom-api/v1/triangulation/', null, {
             headers: {
-                Authorization: `Bearer ${token}`,
+                'X-API-Key': process.env.WP_API_KEY,
             },
         });
-
-        console.log(`Respuesta de la API para ${matricula}:`, JSON.stringify(response.data));
-
-        const busData = response.data[0];
-        if (busData && busData.position) {
-            const direccionTruncada = busData.position.split(',').slice(0, 2).join(',').trim();
-            console.log(`Matrícula ${matricula} - Dirección: ${direccionTruncada}`);
-            return { success: true, text: direccionTruncada };
-        } else {
-            console.log(`No se encontró la dirección para la matrícula ${matricula}.`);
-            return { success: false, text: '' };
-        }
+        console.log('Datos recibidos del proxy:', response.data);
+        return response.data;
     } catch (error) {
-        if (error.response && error.response.status === 401) {
-            console.error(`Token expirado o inválido. Intentando obtener un nuevo token para la matrícula ${matricula}...`);
-            try {
-                const token = await obtenerToken(true);
-                const response = await axios.get(`https://apiavl.easytrack.com.ar/positions/${matricula}`, {
-                    headers: {
-                        Authorization: `Bearer ${token}`,
-                    },
-                });
-                console.log(`Respuesta de la API tras reintento para ${matricula}:`, JSON.stringify(response.data));
-
-                const busData = response.data[0];
-                if (busData && busData.position) {
-                    const direccionTruncada = busData.position.split(',').slice(0, 2).join(',').trim();
-                    console.log(`Matrícula ${matricula} - Dirección: ${direccionTruncada}`);
-                    return { success: true, text: direccionTruncada };
-                } else {
-                    console.log(`No se encontró la dirección para la matrícula ${matricula}.`);
-                    return { success: false, text: '' };
-                }
-            } catch (retryError) {
-                console.error(`Error tras intentar obtener un nuevo token para ${matricula}:`, retryError);
-                return { success: false, text: '' };
-            }
-        } else {
-            console.error(`Error al obtener la ubicación del bus ${matricula}:`, error);
-            return { success: false, text: '' };
-        }
+        console.error('Error al obtener datos del proxy:', error);
+        throw error;
     }
 }
 
-// Función para extraer datos de los buses y generar el XML
+// Función para extraer datos y generar el XML
 async function extractDataAndGenerateXML() {
     try {
-        console.log('Obteniendo token de autenticación...');
-        await obtenerToken();
+        const positions = await obtenerUbicacionesDesdeProxy();
 
-        const busEntries = Object.entries(buses);
+        for (const [busKey, matricula] of Object.entries(buses)) {
+            const position = positions[matricula];
 
-        const results = await Promise.all(
-            busEntries.map(async ([key, matricula]) => {
-                console.log(`Buscando la ubicación de la matrícula ${matricula}...`);
-                const result = await obtenerUbicacionBus(matricula);
-                return { key, result };
-            })
-        );
+            if (position) {
+                const direccionTruncada = position.split(',').slice(0, 2).join(',').trim();
 
-        results.forEach(({ key, result }) => {
-            if (result.success) {
                 const xml = xmlbuilder.create('Response')
-                    .ele('Say', {}, result.text)
+                    .ele('Say', {}, direccionTruncada)
                     .up()
                     .ele('Redirect', {}, `${process.env.TWILIO_WEBHOOK_URL}?FlowEvent=return`)
                     .end({ pretty: true });
 
-                console.log(`XML generado para ${key}:\n${xml}`);
-                latestXml[key] = xml;
+                console.log(`XML generado para ${busKey}:\n${xml}`);
+                latestXml[busKey] = xml;
             } else {
                 const xml = xmlbuilder.create('Response')
                     .ele('Say', {}, 'Lo sentimos, no se pudo obtener la información en este momento. Por favor, intente nuevamente más tarde.')
@@ -151,9 +63,9 @@ async function extractDataAndGenerateXML() {
                     .ele('Redirect', {}, `${process.env.TWILIO_WEBHOOK_URL}?FlowEvent=return`)
                     .end({ pretty: true });
 
-                latestXml[key] = xml;
+                latestXml[busKey] = xml;
             }
-        });
+        }
     } catch (error) {
         console.error('Error al extraer los datos:', error);
     }
