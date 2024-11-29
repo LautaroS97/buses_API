@@ -26,7 +26,7 @@ async function obtenerUbicacionesDesdeProxy() {
         console.log('Solicitando datos al proxy de WordPress...');
         const response = await axios.post('https://proprop.com.ar/wp-json/custom-api/v1/triangulation/', null, {
             headers: {
-                'X-API-Key': process.env.WP_API_KEY,
+                'X-API-Key': process.env.PROXY_API_KEY,
             },
         });
         console.log('Datos recibidos del proxy:', response.data);
