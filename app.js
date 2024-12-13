@@ -51,7 +51,7 @@ async function extractDataAndGenerateXML() {
                 const xml = xmlbuilder.create('Response')
                     .ele('Say', {}, direccionTruncada)
                     .up()
-                    .ele('Redirect', {}, `${process.env.TWILIO_WEBHOOK_URL}?FlowEvent=return`)
+                    .ele('Redirect', { method: 'POST' }, `${process.env.TWILIO_WEBHOOK_URL}?FlowEvent=return`)
                     .end({ pretty: true });
 
                 console.log(`XML generado para ${busKey}:\n${xml}`);
