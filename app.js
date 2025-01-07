@@ -11,13 +11,17 @@ let latestXml = {
     bus_1: null,
     bus_2: null,
     bus_3: null,
+    bus_4: null,
+    bus_5: null,
 };
 
 // Matrículas de los buses
 const buses = {
-    bus_1: 'GQP413',
-    bus_2: 'DPH418',
-    bus_3: 'FMD808',
+    bus_1: 'BVU044',
+    bus_2: 'HFO904',
+    bus_3: 'GQP413',
+    bus_4: 'FMD808',
+    bus_5: 'DPH418',
 };
 
 // Función para obtener las ubicaciones desde el proxy de WordPress
