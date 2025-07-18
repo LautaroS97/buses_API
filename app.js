@@ -1,22 +1,17 @@
-const express = require('express');
-const axios = require('axios');
+const express    = require('express');
+const axios      = require('axios');
 const xmlbuilder = require('xmlbuilder');
-require('dotenv').config(); // Cargar variables de entorno desde el archivo .env
+require('dotenv').config(); // Load environment variables
 
 const app = express();
-app.use(express.json()); // Para manejar el cuerpo de solicitudes POST
+app.use(express.json()); // Handle JSON request bodies
 
-// Variable para almacenar el XML generado
-let latestXml = {
-    bus_1: null,
-    bus_2: null,
-    bus_3: null,
-    bus_4: null,
-    bus_5: null,
-    bus_6: null,
-};
+// ─────────────────────────────────────────────────────────────
+// Config
+// ─────────────────────────────────────────────────────────────
+const MAX_XML_AGE_MINUTES = Number(process.env.MAX_XML_AGE_MINUTES) || 10; // Freshness threshold
 
-// Matrículas de los buses
+// Registration numbers
 const buses = {
     bus_1: 'BVU044',
     bus_2: 'HFO904',
@@ -26,95 +21,117 @@ const buses = {
     bus_6: 'FXT634',
 };
 
-// Función para obtener las ubicaciones desde el proxy de WordPress
-async function obtenerUbicacionesDesdeProxy() {
-    try {
-        console.log('Solicitando datos al proxy de WordPress...');
-        const response = await axios.post('https://proprop.com.ar/wp-json/custom-api/v1/triangulation/', null, {
-            headers: {
-                'X-API-Key': process.env.PROXY_API_KEY,
-            },
-        });
-        console.log('Datos recibidos del proxy:', response.data);
-        return response.data;
-    } catch (error) {
-        console.error('Error al obtener datos del proxy:', error);
-        throw error;
-    }
+// Holds latest XML and its timestamp for each bus
+let latestXml = {};
+Object.keys(buses).forEach(key => {
+    latestXml[key] = { xml: null, timestamp: null };
+});
+
+// ─────────────────────────────────────────────────────────────
+// Helper: request locations from WP proxy
+// ─────────────────────────────────────────────────────────────
+async function fetchLocationsFromProxy() {
+    const url = 'https://proprop.com.ar/wp-json/custom-api/v1/triangulation/';
+
+    console.log('Requesting data from WordPress proxy…');
+    const response = await axios.post(url, null, {
+        headers: { 'X-API-Key': process.env.PROXY_API_KEY },
+        timeout: 10000,
+    });
+    console.log('Proxy data received:', response.data);
+    return response.data;
 }
 
-// Función para extraer datos y generar el XML
-async function extractDataAndGenerateXML() {
+// ─────────────────────────────────────────────────────────────
+// Helper: generate XML for one bus
+// ─────────────────────────────────────────────────────────────
+function buildXml(text) {
+    return xmlbuilder.create('Response')
+        .ele('Say', {}, text)
+        .up()
+        .ele('Redirect', { method: 'POST' }, `${process.env.TWILIO_WEBHOOK_URL}?FlowEvent=return`)
+        .end({ pretty: true });
+}
+
+// ─────────────────────────────────────────────────────────────
+// Core: update XML for every bus
+// ─────────────────────────────────────────────────────────────
+async function updateAllBusXml() {
     try {
-        const positions = await obtenerUbicacionesDesdeProxy();
+        const positions = await fetchLocationsFromProxy();
 
-        for (const [busKey, matricula] of Object.entries(buses)) {
-            const position = positions[matricula];
+        for (const [busKey, plate] of Object.entries(buses)) {
+            const position = positions[plate];
 
-            if (position) {
-                const direccionTruncada = position.split(',').slice(0, 2).join(',').trim();
+            if (position && position.trim()) {
+                const now   = new Date();
+                const time  = now.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
+                const date  = now.toLocaleDateString('es-AR');
+                const addr  = position.split(',').slice(0, 2).join(',').trim();
+                const speak = `${addr}, a las ${time} del ${date}`;
 
-                const xml = xmlbuilder.create('Response')
-                    .ele('Say', {}, direccionTruncada)
-                    .up()
-                    .ele('Redirect', { method: 'POST' }, `${process.env.TWILIO_WEBHOOK_URL}?FlowEvent=return`)
-                    .end({ pretty: true });
+                latestXml[busKey] = {
+                    xml: buildXml(speak),
+                    timestamp: now.toISOString(),
+                };
 
-                console.log(`XML generado para ${busKey}:\n${xml}`);
-                latestXml[busKey] = xml;
+                console.log(`XML generated for ${busKey} (${plate})`);
             } else {
-                const xml = xmlbuilder.create('Response')
-                    .ele('Say', {}, 'Lo sentimos, no se pudo obtener la información en este momento. Por favor, intente nuevamente más tarde.')
-                    .up()
-                    .ele('Redirect', {}, `${process.env.TWILIO_WEBHOOK_URL}?FlowEvent=return`)
-                    .end({ pretty: true });
-
-                latestXml[busKey] = xml;
+                // Position missing – store fallback with current timestamp
+                latestXml[busKey] = {
+                    xml: buildXml('Lo sentimos, no se pudo obtener la información en este momento. Por favor, intente nuevamente más tarde.'),
+                    timestamp: new Date().toISOString(),
+                };
+                console.warn(`No position for ${busKey} (${plate}); stored fallback XML.`);
             }
         }
-    } catch (error) {
-        console.error('Error al extraer los datos:', error);
+    } catch (err) {
+        console.error('Failed to refresh bus locations:', err.message);
     }
 }
 
-// Manejo de la solicitud POST para actualizar el XML de todos los buses
-app.post('/update', async (req, res) => {
-    console.log('Solicitud POST entrante para actualizar los XML de todos los buses');
-    try {
-        await extractDataAndGenerateXML();
-        res.status(200).send({ message: 'Solicitud recibida, XML de los buses se está actualizando.' });
-    } catch (error) {
-        console.error('Error al actualizar los XML de los buses:', error);
-        res.status(500).send({ message: 'Error al actualizar los XML.' });
-    }
+// ─────────────────────────────────────────────────────────────
+// Route: manual refresh trigger (Twilio Studio hits this)
+// ─────────────────────────────────────────────────────────────
+app.post('/update', async (_req, res) => {
+    console.log('POST /update received – refreshing all buses');
+    await updateAllBusXml();
+    res.status(200).json({ message: 'Bus XML refresh initiated.' });
 });
 
-// Manejo de las solicitudes GET para cada bus
+// ─────────────────────────────────────────────────────────────
+// Route: Twilio voice fetch per bus
+// ─────────────────────────────────────────────────────────────
 app.get('/voice/:busKey', (req, res) => {
-    const busKey = req.params.busKey;
-    console.log(`Solicitud entrante a /voice/${busKey}`);
+    const { busKey } = req.params;
+    console.log(`GET /voice/${busKey}`);
 
     if (!buses.hasOwnProperty(busKey)) {
-        return res.status(400).send({ message: 'Bus key no válida' });
+        return res.status(400).json({ message: 'Invalid bus key' });
     }
 
-    if (latestXml[busKey]) {
-        res.type('application/xml');
-        res.send(latestXml[busKey]);
-    } else {
-        const xml = xmlbuilder.create('Response')
-            .ele('Say', {}, 'Lo sentimos, no se pudo obtener la información en este momento. Por favor, intente nuevamente más tarde.')
-            .up()
-            .ele('Redirect', { method: 'POST' }, `${process.env.TWILIO_WEBHOOK_URL}?FlowEvent=return`)
-            .end({ pretty: true });
+    const record = latestXml[busKey];
+    if (record.xml && record.timestamp) {
+        const ageMinutes = (Date.now() - Date.parse(record.timestamp)) / 60000;
 
-        res.type('application/xml');
-        res.send(xml);
+        if (ageMinutes <= MAX_XML_AGE_MINUTES) {
+            res.type('application/xml').send(record.xml);
+            return;
+        }
+
+        console.warn(`${busKey} data is stale (${ageMinutes.toFixed(1)} min old) – serving fallback`);
     }
+
+    // Fallback if missing or stale
+    const fallback = buildXml('En este momento no es posible conocer la ubicación. Intente de nuevo más tarde.');
+    res.type('application/xml').send(fallback);
 });
 
+// ─────────────────────────────────────────────────────────────
+// Start server
+// ─────────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 8080;
 app.listen(PORT, async () => {
-    console.log(`Servidor escuchando en el puerto ${PORT}`);
-    await extractDataAndGenerateXML();
+    console.log(`Server listening on port ${PORT}`);
+    await updateAllBusXml(); // Initial pre‑warm
 });
