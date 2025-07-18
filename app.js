@@ -1,10 +1,10 @@
 const express    = require('express');
 const axios      = require('axios');
 const xmlbuilder = require('xmlbuilder');
-require('dotenv').config(); // Load environment variables
+require('dotenv').config();            // Load environment variables
 
 const app = express();
-app.use(express.json()); // Handle JSON request bodies
+app.use(express.json());               // Handle JSON request bodies
 
 // ─────────────────────────────────────────────────────────────
 // Config
@@ -22,10 +22,10 @@ const buses = {
 };
 
 // Holds latest XML and its timestamp for each bus
-let latestXml = {};
-Object.keys(buses).forEach(key => {
+const latestXml = {};
+for (const key of Object.keys(buses)) {
     latestXml[key] = { xml: null, timestamp: null };
-});
+}
 
 // ─────────────────────────────────────────────────────────────
 // Helper: request locations from WP proxy
@@ -34,16 +34,17 @@ async function fetchLocationsFromProxy() {
     const url = 'https://proprop.com.ar/wp-json/custom-api/v1/triangulation/';
 
     console.log('Requesting data from WordPress proxy…');
-    const response = await axios.post(url, null, {
-        headers: { 'X-API-Key': process.env.PROXY_API_KEY },
-        timeout: 10000,
-    });
+    const response = await axios.post(
+        url,
+        null,
+        { headers: { 'X-API-Key': process.env.PROXY_API_KEY }, timeout: 10_000 }
+    );
     console.log('Proxy data received:', response.data);
     return response.data;
 }
 
 // ─────────────────────────────────────────────────────────────
-// Helper: generate XML for one bus
+// Helper: generate TwiML XML
 // ─────────────────────────────────────────────────────────────
 function buildXml(text) {
     return xmlbuilder.create('Response')
@@ -54,7 +55,7 @@ function buildXml(text) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Core: update XML for every bus
+// Core: refresh XML for all buses
 // ─────────────────────────────────────────────────────────────
 async function updateAllBusXml() {
     try {
@@ -62,28 +63,23 @@ async function updateAllBusXml() {
 
         for (const [busKey, plate] of Object.entries(buses)) {
             const position = positions[plate];
-
-            if (position && position.trim()) {
-                const now   = new Date();
-                const time  = now.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
-                const date  = now.toLocaleDateString('es-AR');
-                const addr  = position.split(',').slice(0, 2).join(',').trim();
-                const speak = `${addr}, a las ${time} del ${date}`;
-
-                latestXml[busKey] = {
-                    xml: buildXml(speak),
-                    timestamp: now.toISOString(),
-                };
-
-                console.log(`XML generated for ${busKey} (${plate})`);
-            } else {
-                // Position missing – store fallback with current timestamp
-                latestXml[busKey] = {
-                    xml: buildXml('Lo sentimos, no se pudo obtener la información en este momento. Por favor, intente nuevamente más tarde.'),
-                    timestamp: new Date().toISOString(),
-                };
-                console.warn(`No position for ${busKey} (${plate}); stored fallback XML.`);
+            if (!position || !position.trim()) {
+                console.warn(`No fresh position for ${busKey} (${plate}); keeping previous data.`);
+                continue; // keep previous XML and timestamp
             }
+
+            const now   = new Date();
+            const time  = now.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
+            const date  = now.toLocaleDateString('es-AR');
+            const addr  = position.split(',').slice(0, 2).join(',').trim();
+            const speak = `${addr}, a las ${time} del ${date}`;
+
+            latestXml[busKey] = {
+                xml: buildXml(speak),
+                timestamp: now.toISOString(),
+            };
+
+            console.log(`XML updated for ${busKey} (${plate})`);
         }
     } catch (err) {
         console.error('Failed to refresh bus locations:', err.message);
@@ -91,7 +87,7 @@ async function updateAllBusXml() {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Route: manual refresh trigger (Twilio Studio hits this)
+// Route: manual refresh trigger (Twilio Studio can hit this)
 // ─────────────────────────────────────────────────────────────
 app.post('/update', async (_req, res) => {
     console.log('POST /update received – refreshing all buses');
@@ -111,20 +107,22 @@ app.get('/voice/:busKey', (req, res) => {
     }
 
     const record = latestXml[busKey];
-    if (record.xml && record.timestamp) {
-        const ageMinutes = (Date.now() - Date.parse(record.timestamp)) / 60000;
 
-        if (ageMinutes <= MAX_XML_AGE_MINUTES) {
-            res.type('application/xml').send(record.xml);
-            return;
+    if (record?.xml) {
+        const ageMin =
+            record.timestamp ? (Date.now() - Date.parse(record.timestamp)) / 60000 : null;
+
+        if (ageMin !== null && ageMin > MAX_XML_AGE_MINUTES) {
+            console.warn(`${busKey} data is stale (${ageMin.toFixed(1)} min old) – serving anyway`);
         }
 
-        console.warn(`${busKey} data is stale (${ageMinutes.toFixed(1)} min old) – serving fallback`);
+        res.type('application/xml').send(record.xml);
+        return;
     }
 
-    // Fallback if missing or stale
-    const fallback = buildXml('En este momento no es posible conocer la ubicación. Intente de nuevo más tarde.');
-    res.type('application/xml').send(fallback);
+    // No data yet (e.g. first call and proxy failed)
+    const xml = buildXml('Aún no hay datos disponibles. Intente nuevamente en unos instantes.');
+    res.type('application/xml').send(xml);
 });
 
 // ─────────────────────────────────────────────────────────────
