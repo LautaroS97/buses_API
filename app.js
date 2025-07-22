@@ -1,6 +1,7 @@
 const express    = require('express');
 const axios      = require('axios');
 const xmlbuilder = require('xmlbuilder');
+const { DateTime } = require('luxon');
 require('dotenv').config();            // Load environment variables
 
 const app = express();
@@ -68,11 +69,11 @@ async function updateAllBusXml() {
                 continue; // keep previous XML and timestamp
             }
 
-            const now   = new Date();
-            const time  = now.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
-            const date  = now.toLocaleDateString('es-AR');
-            const addr  = position.split(',').slice(0, 2).join(',').trim();
-            const speak = `${addr}, a las ${time} del ${date}`;
+        const now  = DateTime.now().setZone('America/Argentina/Buenos_Aires');
+        const time = now.toFormat('HH:mm');
+        const date = now.toFormat('dd/MM/yyyy');
+        const addr = position.split(',').slice(0, 2).join(',').trim();
+        const speak = `${addr}, a las ${time} del ${date}`;
 
             latestXml[busKey] = {
                 xml: buildXml(speak),
