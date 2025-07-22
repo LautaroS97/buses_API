@@ -25,11 +25,13 @@ for (const key of Object.keys(buses)) {
 
 async function fetchLocationsFromProxy() {
     const url = 'https://proprop.com.ar/wp-json/custom-api/v1/triangulation/';
+    console.log('Requesting data from WordPress proxy…');
     const response = await axios.post(
         url,
         null,
         { headers: { 'X-API-Key': process.env.PROXY_API_KEY }, timeout: 10_000 }
     );
+    console.log('Proxy data received:', response.data);
     return response.data;
 }
 
@@ -46,7 +48,10 @@ async function updateAllBusXml() {
         const positions = await fetchLocationsFromProxy();
         for (const [busKey, plate] of Object.entries(buses)) {
             const position = positions[plate];
-            if (!position || !position.trim()) continue;
+            if (!position || !position.trim()) {
+                console.warn(`No fresh position for ${busKey} (${plate}); keeping previous data.`);
+                continue;
+            }
             const now  = DateTime.now().setZone('America/Argentina/Buenos_Aires');
             const time = now.toFormat('HH:mm');
             const addr = position.split(',').slice(0, 2).join(',').trim();
@@ -55,6 +60,7 @@ async function updateAllBusXml() {
                 xml: buildXml(speak),
                 timestamp: now.toISO(),
             };
+            console.log(`XML updated for ${busKey} (${plate})`);
         }
     } catch (err) {
         console.error('Failed to refresh bus locations:', err.message);
@@ -62,12 +68,14 @@ async function updateAllBusXml() {
 }
 
 app.post('/update', async (_req, res) => {
+    console.log('POST /update received – refreshing all buses');
     await updateAllBusXml();
     res.status(200).json({ message: 'Bus XML refresh initiated.' });
 });
 
 app.get('/voice/:busKey', (req, res) => {
     const { busKey } = req.params;
+    console.log(`GET /voice/${busKey}`);
     if (!Object.prototype.hasOwnProperty.call(buses, busKey)) {
         return res.status(400).json({ message: 'Invalid bus key' });
     }
