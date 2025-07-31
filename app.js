@@ -1,5 +1,5 @@
-const express    = require('express');
-const axios      = require('axios');
+const express = require('express');
+const axios = require('axios');
 const xmlbuilder = require('xmlbuilder');
 const { DateTime } = require('luxon');
 require('dotenv').config();
@@ -25,13 +25,11 @@ for (const key of Object.keys(buses)) {
 
 async function fetchLocationsFromProxy() {
     const url = 'https://proprop.com.ar/wp-json/custom-api/v1/triangulation/';
-    console.log('Requesting data from WordPress proxy…');
     const response = await axios.post(
         url,
         null,
         { headers: { 'X-API-Key': process.env.PROXY_API_KEY }, timeout: 10_000 }
     );
-    console.log('Proxy data received:', response.data);
     return response.data;
 }
 
@@ -47,18 +45,28 @@ async function updateAllBusXml() {
     try {
         const positions = await fetchLocationsFromProxy();
         for (const [busKey, plate] of Object.entries(buses)) {
-            const position = positions[plate];
-            if (!position || !position.trim()) {
+            const rec = positions[plate];
+            let addr = '';
+            let tsStr = null;
+            if (typeof rec === 'string') {
+                addr = rec.trim();
+            } else if (rec && typeof rec === 'object') {
+                addr = (rec.addr || '').trim();
+                tsStr = rec.ts || null;
+            }
+            if (!addr) {
                 console.warn(`No fresh position for ${busKey} (${plate}); keeping previous data.`);
                 continue;
             }
-            const now  = DateTime.now().setZone('America/Argentina/Buenos_Aires');
-            const time = now.toFormat('HH:mm');
-            const addr = position.split(',').slice(0, 2).join(',').trim();
-            const speak = `${addr}, a las ${time}`;
+            const timeDt = tsStr
+                ? DateTime.fromISO(tsStr).setZone('America/Argentina/Buenos_Aires')
+                : DateTime.now().setZone('America/Argentina/Buenos_Aires');
+            const time = timeDt.toFormat('HH:mm');
+            const shortAddr = addr.split(',').slice(0, 2).join(',').trim();
+            const speak = `${shortAddr}, a las ${time}`;
             latestXml[busKey] = {
                 xml: buildXml(speak),
-                timestamp: now.toISO(),
+                timestamp: DateTime.now().toISO(),
             };
             console.log(`XML updated for ${busKey} (${plate})`);
         }
@@ -68,14 +76,12 @@ async function updateAllBusXml() {
 }
 
 app.post('/update', async (_req, res) => {
-    console.log('POST /update received – refreshing all buses');
     await updateAllBusXml();
     res.status(200).json({ message: 'Bus XML refresh initiated.' });
 });
 
 app.get('/voice/:busKey', (req, res) => {
     const { busKey } = req.params;
-    console.log(`GET /voice/${busKey}`);
     if (!Object.prototype.hasOwnProperty.call(buses, busKey)) {
         return res.status(400).json({ message: 'Invalid bus key' });
     }
@@ -93,6 +99,5 @@ app.get('/voice/:busKey', (req, res) => {
 
 const PORT = process.env.PORT || 8080;
 app.listen(PORT, async () => {
-    console.log(`Server listening on port ${PORT}`);
     await updateAllBusXml();
 });
