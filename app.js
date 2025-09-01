@@ -12,7 +12,7 @@ const MAX_XML_AGE_MINUTES = Number(process.env.MAX_XML_AGE_MINUTES) || 10;
 const buses = {
     bus_1: 'BVU044',
     bus_2: 'HFO904',
-    bus_3: 'GQP413',
+    bus_3: 'FBG600',
     bus_4: 'FMD808',
     bus_5: 'DPH418',
     bus_6: 'FXT634',
